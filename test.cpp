@@ -556,7 +556,7 @@ private:
 
             cout << "1. Create New Playlist\n";
             cout << "2. Show All Saved Playlists\n";
-            cout << "3. Show Songs in a Playlist\n";
+            cout << "3. Show Songs in Active Playlist\n";
             cout << "4. Switch to a Playlist\n";
             cout << "5. Add Song to a Playlist\n";
             cout << "0. Back to Main Menu\n";
@@ -566,12 +566,23 @@ private:
 
             switch (choice)
             {
-            case 1: createNewPlaylist();      break;
-            case 2: showAllPlaylists();        break;
-            case 3: showSongsInPlaylist();     break;
-            case 4: switchToPlaylist();        break;
-            case 5: addSongToNamedPlaylist();  break;
-            case 0: break;
+            case 1:
+                createNewPlaylist();
+                break;
+            case 2:
+                showAllPlaylists();
+                break;
+            case 3:
+                showSongsInActivePlaylist();
+                break;
+            case 4:
+                switchToPlaylist();
+                break;
+            case 5:
+                addSongToNamedPlaylist();
+                break;
+            case 0:
+                break;
             default:
                 cout << "Invalid choice!\n";
             }
@@ -584,7 +595,7 @@ private:
         } while (choice != 0);
     }
 
-    // Create a new named playlist
+    // Create a new named playlist, then immediately flow into adding songs
     void createNewPlaylist()
     {
         clearScreen();
@@ -601,12 +612,22 @@ private:
 
         // Sanitize: replace spaces with underscores for safe filenames
         for (int i = 0; i < (int)name.length(); i++)
-            if (name[i] == ' ') name[i] = '_';
+            if (name[i] == ' ')
+                name[i] = '_';
 
-        if (playlistMgr.createPlaylist(name))
-            cout << "[+] Playlist \"" << name << "\" created and saved as playlist_" << name << ".csv\n";
-        else
+        if (!playlistMgr.createPlaylist(name))
+        {
             cout << "[!] A playlist named \"" << name << "\" already exists.\n";
+            return;
+        }
+
+        cout << "[+] Playlist \"" << name << "\" created! (playlist_" << name << ".csv)\n";
+        cout << "\nNow let's add songs to it.\n";
+        cout << "Press Enter to continue...";
+        cin.get();
+
+        // Directly flow into adding songs to this new playlist
+        addSongToNamedPlaylistByName(name);
     }
 
     // Show all saved playlists from the index
@@ -629,26 +650,38 @@ private:
         cout << "\n  Total custom playlists: " << count << "\n";
     }
 
-    // Show songs inside a specific named playlist
-    void showSongsInPlaylist()
+    // Show songs in the currently active playlist (no prompt, just display)
+    void showSongsInActivePlaylist()
     {
         clearScreen();
-        cout << "=== Show Songs in Playlist ===\n\n";
-        string names[100];
-        int count = playlistMgr.getSavedPlaylists(names, 100);
-        if (count == 0)
+        cout << "=== Songs in Active Playlist ===\n\n";
+
+        if (activePlaylistName.empty())
         {
-            cout << "  No custom playlists found.\n";
-            return;
+            cout << "  Active: [Default Playlist]\n\n";
+            if (!head)
+            {
+                cout << "  (Playlist is empty.)\n";
+                return;
+            }
+            Node *temp = head;
+            int num = 1;
+            do
+            {
+                cout << "  " << num++ << ". \""
+                     << temp->song.title << "\" by " << temp->song.artist
+                     << "  |  " << temp->song.genre
+                     << "  |  " << temp->song.year
+                     << "  |  " << temp->song.duration << "\n";
+                temp = temp->next;
+            } while (temp != head);
+            cout << "\n  Total: " << (num - 1) << " song(s)\n";
         }
-        cout << "  Available playlists:\n";
-        for (int i = 0; i < count; i++)
-            cout << "  " << (i + 1) << ". " << names[i] << "\n";
-        cout << "\nEnter playlist name to view: ";
-        string name;
-        getline(cin, name);
-        cout << "\n";
-        playlistMgr.showPlaylist(name);
+        else
+        {
+            cout << "  Active: \"" << activePlaylistName << "\"\n\n";
+            playlistMgr.showPlaylist(activePlaylistName);
+        }
     }
 
     // Switch the active playlist (reloads the linked list)
@@ -701,69 +734,140 @@ private:
         }
     }
 
-    // Add a song to a specific named playlist (does not affect main player)
+    // Core logic: add songs from the master list to a named playlist by name.
+    // Used both by createNewPlaylist() flow and addSongToNamedPlaylist().
+    void addSongToNamedPlaylistByName(string playlistName)
+    {
+        while (true)
+        {
+            clearScreen();
+            cout << "=== Add Song to \"" << playlistName << "\" ===\n\n";
+
+            // Load all songs from the master CSV
+            Song allSongs[500];
+            int totalSongs = csv.loadSongs(allSongs, 500);
+
+            if (totalSongs == 0)
+            {
+                cout << "  [!] No songs found in the master playlist.\n";
+                return;
+            }
+
+            // Build list of songs NOT already in the target playlist
+            Song available[500];
+            int availCount = 0;
+            for (int i = 0; i < totalSongs; i++)
+            {
+                if (!playlistMgr.isDuplicateInPlaylist(playlistName,
+                                                       allSongs[i].title,
+                                                       allSongs[i].artist))
+                {
+                    available[availCount++] = allSongs[i];
+                }
+            }
+
+            if (availCount == 0)
+            {
+                cout << "  [!] All songs are already in playlist \"" << playlistName << "\".\n";
+                return;
+            }
+
+            // Display available songs
+            cout << "  Songs available to add:\n";
+            cout << "  " << string(60, '-') << "\n";
+            for (int i = 0; i < availCount; i++)
+            {
+                cout << "  " << (i + 1) << ". \""
+                     << available[i].title << "\" by " << available[i].artist
+                     << "  |  " << available[i].genre
+                     << "  |  " << available[i].year
+                     << "  |  " << available[i].duration << "\n";
+            }
+            cout << "  " << string(60, '-') << "\n";
+            cout << "  0. Done\n\n";
+
+            cout << "  Enter song number to add: ";
+            int pick;
+            cin >> pick;
+            cin.ignore();
+
+            if (pick == 0)
+            {
+                cout << "\n  [Done] Finished adding songs to \"" << playlistName << "\".\n";
+                return;
+            }
+
+            if (pick < 1 || pick > availCount)
+            {
+                cout << "\n  [!] Invalid number. Please try again.\n";
+                cout << "  Press Enter to continue...";
+                cin.get();
+                continue;
+            }
+
+            Song chosen = available[pick - 1];
+            playlistMgr.addSongToPlaylist(playlistName, chosen);
+
+            // If this playlist is currently active, also insert into linked list
+            if (toLower(activePlaylistName) == toLower(playlistName))
+            {
+                insertAtEnd(chosen);
+                cout << "\n  [+] \"" << chosen.title << "\" added! (Also added to the active player.)\n";
+            }
+            else
+            {
+                cout << "\n  [+] \"" << chosen.title << "\" added to \"" << playlistName << "\"!\n";
+            }
+
+            // Ask to add more or done
+            cout << "  Add another song? (1 = Yes / 0 = Done): ";
+            int more;
+            cin >> more;
+            cin.ignore();
+            if (more != 1)
+            {
+                cout << "\n  [Done] Finished adding songs to \"" << playlistName << "\".\n";
+                return;
+            }
+        }
+    }
+
+    // Add a song to a specific named playlist — pick playlist by number
     void addSongToNamedPlaylist()
     {
         clearScreen();
-        cout << "=== Add Song to Playlist ===\n\n";
+        cout << "=== Add Song to a Playlist ===\n\n";
+
         string names[100];
         int count = playlistMgr.getSavedPlaylists(names, 100);
+
         if (count == 0)
         {
             cout << "  No custom playlists found. Create one first!\n";
             return;
         }
+
         cout << "  Available playlists:\n";
         for (int i = 0; i < count; i++)
             cout << "  " << (i + 1) << ". " << names[i] << "\n";
-        cout << "\nEnter playlist name to add to: ";
-        string name;
-        getline(cin, name);
+        cout << "  0. Cancel\n\n";
 
-        // Verify playlist exists
-        bool found = false;
-        for (int i = 0; i < count; i++)
-            if (toLower(names[i]) == toLower(name)) { found = true; break; }
-        if (!found)
-        {
-            cout << "[!] Playlist \"" << name << "\" not found.\n";
-            return;
-        }
-
-        cout << "\n--- Song Details ---\n";
-        string title, artist, genre, duration;
-        int year;
-        cout << "Enter song title      : ";
-        getline(cin, title);
-        cout << "Enter artist name     : ";
-        getline(cin, artist);
-
-        if (playlistMgr.isDuplicateInPlaylist(name, title, artist))
-        {
-            cout << "\n[!] \"" << title << "\" by " << artist
-                 << " is already in playlist \"" << name << "\"!\n";
-            return;
-        }
-
-        cout << "Enter genre           : ";
-        getline(cin, genre);
-        cout << "Enter release year    : ";
-        cin >> year;
+        cout << "  Enter playlist number: ";
+        int pick;
+        cin >> pick;
         cin.ignore();
-        cout << "Enter duration (MM:SS): ";
-        getline(cin, duration);
 
-        Song s(title, artist, genre, year, duration);
-        playlistMgr.addSongToPlaylist(name, s);
+        if (pick == 0)
+            return;
 
-        cout << "\n[+] \"" << title << "\" added to playlist \"" << name << "\"!\n";
-
-        // If this playlist is currently active, also insert into linked list
-        if (toLower(activePlaylistName) == toLower(name))
+        if (pick < 1 || pick > count)
         {
-            insertAtEnd(s);
-            cout << "  (Also added to the currently active player.)\n";
+            cout << "\n  [!] Invalid number.\n";
+            return;
         }
+
+        string chosenPlaylist = names[pick - 1];
+        addSongToNamedPlaylistByName(chosenPlaylist);
     }
 
 public:
@@ -775,6 +879,15 @@ public:
         activePlaylistName = "";
         csv.createDefaultCSV();
         loadFromCSV();
+    }
+
+    // Print active playlist label (used by main menu)
+    void printActivePlaylist()
+    {
+        if (activePlaylistName.empty())
+            cout << "[Default Playlist]";
+        else
+            cout << "\"" << activePlaylistName << "\"";
     }
 
     void loadFromCSV()
@@ -1020,6 +1133,9 @@ void menu()
     {
         clearScreen();
         cout << "=== Music Player ===\n";
+        cout << "  Active: ";
+        player.printActivePlaylist();
+        cout << "\n\n";
         cout << "1. Add Song\n";
         cout << "2. Play Current Song\n";
         cout << "3. Next Song\n";
