@@ -13,6 +13,7 @@ using namespace std;
 // Constants
 const string CSV_FILE = "playlist.csv";
 const string EXPECTED_HEADER = "Title,Artist,Genre,Year,Duration";
+const string PLAYLIST_INDEX_FILE = "playlists.txt"; // Stores list of saved playlist names
 
 // Clear Screen
 void clearScreen()
@@ -177,7 +178,12 @@ public:
 
     bool isDuplicate(string title, string artist)
     {
-        ifstream file(CSV_FILE);
+        return isDuplicateIn(CSV_FILE, title, artist);
+    }
+
+    bool isDuplicateIn(string filename, string title, string artist)
+    {
+        ifstream file(filename);
         if (!file.is_open())
             return false;
         string line;
@@ -202,7 +208,12 @@ public:
 
     void saveSong(Song s)
     {
-        ofstream file(CSV_FILE, ios::app);
+        saveSongTo(CSV_FILE, s);
+    }
+
+    void saveSongTo(string filename, Song s)
+    {
+        ofstream file(filename, ios::app);
         if (!file.is_open())
         {
             cout << "Error: Cannot write CSV.\n";
@@ -215,7 +226,12 @@ public:
 
     int loadSongs(Song songs[], int maxSongs)
     {
-        ifstream file(CSV_FILE);
+        return loadSongsFrom(CSV_FILE, songs, maxSongs);
+    }
+
+    int loadSongsFrom(string filename, Song songs[], int maxSongs)
+    {
+        ifstream file(filename);
         if (!file.is_open())
         {
             cout << "Error: Cannot open CSV.\n";
@@ -239,6 +255,129 @@ public:
     }
 };
 
+// CLASS: PlaylistManager
+// Handles creation, saving, loading, and listing of named custom playlists.
+// Each playlist is saved as "playlist_<name>.csv".
+// A master index file "playlists.txt" tracks all playlist names.
+class PlaylistManager
+{
+private:
+    CSVManager csv;
+
+    // Build the CSV filename for a given playlist name
+    string buildFilename(string name)
+    {
+        return "playlist_" + name + ".csv";
+    }
+
+    // Register a playlist name in the index file (no duplicates)
+    void registerPlaylist(string name)
+    {
+        // Check if already registered
+        ifstream check(PLAYLIST_INDEX_FILE);
+        if (check.is_open())
+        {
+            string line;
+            while (getline(check, line))
+            {
+                if (toLower(line) == toLower(name))
+                {
+                    check.close();
+                    return;
+                }
+            }
+            check.close();
+        }
+        ofstream index(PLAYLIST_INDEX_FILE, ios::app);
+        if (index.is_open())
+        {
+            index << name << "\n";
+            index.close();
+        }
+    }
+
+public:
+    // Get all saved playlist names
+    int getSavedPlaylists(string names[], int maxNames)
+    {
+        ifstream file(PLAYLIST_INDEX_FILE);
+        if (!file.is_open())
+            return 0;
+        int count = 0;
+        string line;
+        while (getline(file, line) && count < maxNames)
+        {
+            if (!line.empty())
+                names[count++] = line;
+        }
+        file.close();
+        return count;
+    }
+
+    // Create a new empty playlist with a given name
+    // Returns false if name is already taken
+    bool createPlaylist(string name)
+    {
+        string filename = buildFilename(name);
+        ifstream check(filename);
+        if (check.is_open())
+        {
+            check.close();
+            return false; // Already exists
+        }
+        ofstream file(filename);
+        if (!file.is_open())
+            return false;
+        file << EXPECTED_HEADER << "\n";
+        file.close();
+        registerPlaylist(name);
+        return true;
+    }
+
+    // Add a song to a named playlist
+    void addSongToPlaylist(string name, Song s)
+    {
+        string filename = buildFilename(name);
+        csv.saveSongTo(filename, s);
+    }
+
+    // Check for duplicate in a named playlist
+    bool isDuplicateInPlaylist(string name, string title, string artist)
+    {
+        return csv.isDuplicateIn(buildFilename(name), title, artist);
+    }
+
+    // Load songs from a named playlist
+    int loadPlaylist(string name, Song songs[], int maxSongs)
+    {
+        return csv.loadSongsFrom(buildFilename(name), songs, maxSongs);
+    }
+
+    // Display all songs in a named playlist
+    void showPlaylist(string name)
+    {
+        Song songs[500];
+        int count = loadPlaylist(name, songs, 500);
+        if (count == 0)
+        {
+            cout << "  (Playlist is empty or not found.)\n";
+            return;
+        }
+        cout << "  Playlist: \"" << name << "\"\n";
+        cout << "  " << string(50, '-') << "\n";
+        for (int i = 0; i < count; i++)
+        {
+            cout << "  " << (i + 1) << ". \""
+                 << songs[i].title << "\" by " << songs[i].artist
+                 << "  |  " << songs[i].genre
+                 << "  |  " << songs[i].year
+                 << "  |  " << songs[i].duration << "\n";
+        }
+        cout << "  " << string(50, '-') << "\n";
+        cout << "  Total: " << count << " song(s)\n";
+    }
+};
+
 // CLASS: MusicPlayer
 class MusicPlayer
 {
@@ -247,6 +386,8 @@ private:
     Node *current;
     bool isPlaying; // true only after user picks a song to play
     CSVManager csv;
+    PlaylistManager playlistMgr;
+    string activePlaylistName; // "" = default playlist
 
     // Print full song details
     void displaySong(Song s)
@@ -291,6 +432,25 @@ private:
             newNode->next = head;
             head->prev = newNode;
         }
+    }
+
+    // Clear the linked list
+    void clearList()
+    {
+        if (!head)
+            return;
+        Node *temp = head;
+        Node *nextNode;
+        head->prev->next = nullptr; // break the circle
+        while (temp)
+        {
+            nextNode = temp->next;
+            delete temp;
+            temp = nextNode;
+        }
+        head = nullptr;
+        current = nullptr;
+        isPlaying = false;
     }
 
     // Fisher-Yates shuffle on the linked list
@@ -381,12 +541,238 @@ private:
         cout << "\n\n  [DONE] Finished playing.\n";
     }
 
+    // ── Playlist Manager Submenu ──────────────────────────────────────────
+    void managePlaylistsMenu()
+    {
+        int choice;
+        do
+        {
+            clearScreen();
+            cout << "=== Manage Playlists ===\n";
+            if (activePlaylistName.empty())
+                cout << "  Active: [Default Playlist]\n\n";
+            else
+                cout << "  Active: \"" << activePlaylistName << "\"\n\n";
+
+            cout << "1. Create New Playlist\n";
+            cout << "2. Show All Saved Playlists\n";
+            cout << "3. Show Songs in a Playlist\n";
+            cout << "4. Switch to a Playlist\n";
+            cout << "5. Add Song to a Playlist\n";
+            cout << "0. Back to Main Menu\n";
+            cout << "Enter your choice: ";
+            cin >> choice;
+            cin.ignore();
+
+            switch (choice)
+            {
+            case 1: createNewPlaylist();      break;
+            case 2: showAllPlaylists();        break;
+            case 3: showSongsInPlaylist();     break;
+            case 4: switchToPlaylist();        break;
+            case 5: addSongToNamedPlaylist();  break;
+            case 0: break;
+            default:
+                cout << "Invalid choice!\n";
+            }
+
+            if (choice != 0)
+            {
+                cout << "\nPress Enter to continue...";
+                cin.get();
+            }
+        } while (choice != 0);
+    }
+
+    // Create a new named playlist
+    void createNewPlaylist()
+    {
+        clearScreen();
+        cout << "=== Create New Playlist ===\n\n";
+        cout << "Enter a name for the new playlist: ";
+        string name;
+        getline(cin, name);
+
+        if (name.empty())
+        {
+            cout << "[!] Playlist name cannot be empty.\n";
+            return;
+        }
+
+        // Sanitize: replace spaces with underscores for safe filenames
+        for (int i = 0; i < (int)name.length(); i++)
+            if (name[i] == ' ') name[i] = '_';
+
+        if (playlistMgr.createPlaylist(name))
+            cout << "[+] Playlist \"" << name << "\" created and saved as playlist_" << name << ".csv\n";
+        else
+            cout << "[!] A playlist named \"" << name << "\" already exists.\n";
+    }
+
+    // Show all saved playlists from the index
+    void showAllPlaylists()
+    {
+        clearScreen();
+        cout << "=== All Saved Playlists ===\n\n";
+        string names[100];
+        int count = playlistMgr.getSavedPlaylists(names, 100);
+        if (count == 0)
+        {
+            cout << "  No custom playlists found.\n";
+            cout << "  Only the default playlist (playlist.csv) exists.\n";
+            return;
+        }
+        cout << "  0. [Default Playlist]  (playlist.csv)\n";
+        for (int i = 0; i < count; i++)
+            cout << "  " << (i + 1) << ". " << names[i]
+                 << "  (playlist_" << names[i] << ".csv)\n";
+        cout << "\n  Total custom playlists: " << count << "\n";
+    }
+
+    // Show songs inside a specific named playlist
+    void showSongsInPlaylist()
+    {
+        clearScreen();
+        cout << "=== Show Songs in Playlist ===\n\n";
+        string names[100];
+        int count = playlistMgr.getSavedPlaylists(names, 100);
+        if (count == 0)
+        {
+            cout << "  No custom playlists found.\n";
+            return;
+        }
+        cout << "  Available playlists:\n";
+        for (int i = 0; i < count; i++)
+            cout << "  " << (i + 1) << ". " << names[i] << "\n";
+        cout << "\nEnter playlist name to view: ";
+        string name;
+        getline(cin, name);
+        cout << "\n";
+        playlistMgr.showPlaylist(name);
+    }
+
+    // Switch the active playlist (reloads the linked list)
+    void switchToPlaylist()
+    {
+        clearScreen();
+        cout << "=== Switch Playlist ===\n\n";
+        string names[100];
+        int count = playlistMgr.getSavedPlaylists(names, 100);
+
+        cout << "  0. [Default Playlist]\n";
+        for (int i = 0; i < count; i++)
+            cout << "  " << (i + 1) << ". " << names[i] << "\n";
+
+        cout << "\nEnter playlist name to switch to (or 'default'): ";
+        string name;
+        getline(cin, name);
+
+        clearList();
+
+        if (toLower(name) == "default" || name == "0" || name.empty())
+        {
+            activePlaylistName = "";
+            Song songs[500];
+            int c = csv.loadSongs(songs, 500);
+            for (int i = 0; i < c; i++)
+                insertAtEnd(songs[i]);
+            cout << "\n[+] Switched to Default Playlist. Loaded " << c << " song(s).\n";
+        }
+        else
+        {
+            Song songs[500];
+            int c = playlistMgr.loadPlaylist(name, songs, 500);
+            if (c == 0)
+            {
+                cout << "\n[!] Playlist \"" << name << "\" not found or is empty.\n";
+                // Fall back to default
+                activePlaylistName = "";
+                int d = csv.loadSongs(songs, 500);
+                for (int i = 0; i < d; i++)
+                    insertAtEnd(songs[i]);
+            }
+            else
+            {
+                activePlaylistName = name;
+                for (int i = 0; i < c; i++)
+                    insertAtEnd(songs[i]);
+                cout << "\n[+] Switched to \"" << name << "\". Loaded " << c << " song(s).\n";
+            }
+        }
+    }
+
+    // Add a song to a specific named playlist (does not affect main player)
+    void addSongToNamedPlaylist()
+    {
+        clearScreen();
+        cout << "=== Add Song to Playlist ===\n\n";
+        string names[100];
+        int count = playlistMgr.getSavedPlaylists(names, 100);
+        if (count == 0)
+        {
+            cout << "  No custom playlists found. Create one first!\n";
+            return;
+        }
+        cout << "  Available playlists:\n";
+        for (int i = 0; i < count; i++)
+            cout << "  " << (i + 1) << ". " << names[i] << "\n";
+        cout << "\nEnter playlist name to add to: ";
+        string name;
+        getline(cin, name);
+
+        // Verify playlist exists
+        bool found = false;
+        for (int i = 0; i < count; i++)
+            if (toLower(names[i]) == toLower(name)) { found = true; break; }
+        if (!found)
+        {
+            cout << "[!] Playlist \"" << name << "\" not found.\n";
+            return;
+        }
+
+        cout << "\n--- Song Details ---\n";
+        string title, artist, genre, duration;
+        int year;
+        cout << "Enter song title      : ";
+        getline(cin, title);
+        cout << "Enter artist name     : ";
+        getline(cin, artist);
+
+        if (playlistMgr.isDuplicateInPlaylist(name, title, artist))
+        {
+            cout << "\n[!] \"" << title << "\" by " << artist
+                 << " is already in playlist \"" << name << "\"!\n";
+            return;
+        }
+
+        cout << "Enter genre           : ";
+        getline(cin, genre);
+        cout << "Enter release year    : ";
+        cin >> year;
+        cin.ignore();
+        cout << "Enter duration (MM:SS): ";
+        getline(cin, duration);
+
+        Song s(title, artist, genre, year, duration);
+        playlistMgr.addSongToPlaylist(name, s);
+
+        cout << "\n[+] \"" << title << "\" added to playlist \"" << name << "\"!\n";
+
+        // If this playlist is currently active, also insert into linked list
+        if (toLower(activePlaylistName) == toLower(name))
+        {
+            insertAtEnd(s);
+            cout << "  (Also added to the currently active player.)\n";
+        }
+    }
+
 public:
     MusicPlayer()
     {
         head = nullptr;
         current = nullptr;
         isPlaying = false;
+        activePlaylistName = "";
         csv.createDefaultCSV();
         loadFromCSV();
     }
@@ -533,6 +919,11 @@ public:
         clearScreen();
         cout << "=== Playlist ===\n\n";
 
+        if (activePlaylistName.empty())
+            cout << "  Active: [Default Playlist]\n\n";
+        else
+            cout << "  Active: \"" << activePlaylistName << "\"\n\n";
+
         if (!head)
         {
             cout << "Playlist is empty!\n";
@@ -610,6 +1001,12 @@ public:
         displaySong(current->song);
         runTimer(current->song);
     }
+
+    // 8. Manage Playlists
+    void managePlaylists()
+    {
+        managePlaylistsMenu();
+    }
 };
 
 // Main Menu
@@ -630,6 +1027,7 @@ void menu()
         cout << "5. Show Playlist\n";
         cout << "6. Play Random Song\n";
         cout << "7. Shuffle Playlist\n";
+        cout << "8. Manage Playlists\n";
         cout << "0. Exit\n";
         cout << "Enter your choice: ";
         cin >> choice;
@@ -657,6 +1055,9 @@ void menu()
             break;
         case 7:
             player.shufflePlaylist();
+            break;
+        case 8:
+            player.managePlaylists();
             break;
         case 0:
             clearScreen();
