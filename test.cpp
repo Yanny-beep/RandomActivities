@@ -689,48 +689,89 @@ private:
     {
         clearScreen();
         cout << "=== Switch Playlist ===\n\n";
+
         string names[100];
         int count = playlistMgr.getSavedPlaylists(names, 100);
 
+        // Display playlists
         cout << "  0. [Default Playlist]\n";
         for (int i = 0; i < count; i++)
             cout << "  " << (i + 1) << ". " << names[i] << "\n";
 
-        cout << "\nEnter playlist name to switch to (or 'default'): ";
-        string name;
-        getline(cin, name);
+        cout << "\nEnter playlist number or name (or 'default'): ";
+        string input;
+        getline(cin, input);
 
         clearList();
 
-        if (toLower(name) == "default" || name == "0" || name.empty())
+        string selectedName = "";
+
+        // 🔹 CASE 1: Default playlist
+        if (toLower(input) == "default" || input == "0" || input.empty())
         {
             activePlaylistName = "";
+
             Song songs[500];
             int c = csv.loadSongs(songs, 500);
             for (int i = 0; i < c; i++)
                 insertAtEnd(songs[i]);
+
             cout << "\n[+] Switched to Default Playlist. Loaded " << c << " song(s).\n";
+            return;
         }
-        else
+
+        // 🔹 CASE 2: Check if input is a number
+        bool isNumber = true;
+        for (char c : input)
         {
-            Song songs[500];
-            int c = playlistMgr.loadPlaylist(name, songs, 500);
-            if (c == 0)
+            if (!isdigit(c))
             {
-                cout << "\n[!] Playlist \"" << name << "\" not found or is empty.\n";
-                // Fall back to default
-                activePlaylistName = "";
-                int d = csv.loadSongs(songs, 500);
-                for (int i = 0; i < d; i++)
-                    insertAtEnd(songs[i]);
+                isNumber = false;
+                break;
+            }
+        }
+
+        if (isNumber)
+        {
+            int choice = stoi(input);
+
+            if (choice >= 1 && choice <= count)
+            {
+                selectedName = names[choice - 1];
             }
             else
             {
-                activePlaylistName = name;
-                for (int i = 0; i < c; i++)
-                    insertAtEnd(songs[i]);
-                cout << "\n[+] Switched to \"" << name << "\". Loaded " << c << " song(s).\n";
+                cout << "\n[!] Invalid number selection.\n";
+                return;
             }
+        }
+        else
+        {
+            // 🔹 CASE 3: Treat input as playlist name
+            selectedName = input;
+        }
+
+        // 🔹 Load selected playlist
+        Song songs[500];
+        int c = playlistMgr.loadPlaylist(selectedName, songs, 500);
+
+        if (c == 0)
+        {
+            cout << "\n[!] Playlist \"" << selectedName << "\" not found or is empty.\n";
+
+            // fallback to default
+            activePlaylistName = "";
+            int d = csv.loadSongs(songs, 500);
+            for (int i = 0; i < d; i++)
+                insertAtEnd(songs[i]);
+        }
+        else
+        {
+            activePlaylistName = selectedName;
+            for (int i = 0; i < c; i++)
+                insertAtEnd(songs[i]);
+
+            cout << "\n[+] Switched to \"" << selectedName << "\". Loaded " << c << " song(s).\n";
         }
     }
 
@@ -812,7 +853,7 @@ private:
             if (toLower(activePlaylistName) == toLower(playlistName))
             {
                 insertAtEnd(chosen);
-                cout << "\n  [+] \"" << chosen.title << "\" added! (Also added to the active player.)\n";
+                cout << "\n  [+] \"" << chosen.title << "\" added (Also added to the active player.)\n";
             }
             else
             {
