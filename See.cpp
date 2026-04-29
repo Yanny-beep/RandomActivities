@@ -640,13 +640,13 @@ private:
         if (count == 0)
         {
             cout << "  No custom playlists found.\n";
-            cout << "  Only the default playlist (playlist.csv) exists.\n";
+            cout << "  Only the default playlis exists.\n";
             return;
         }
-        cout << "  0. [Default Playlist]  (playlist.csv)\n";
+        cout << "  0. [Default Playlist]\n";
         for (int i = 0; i < count; i++)
-            cout << "  " << (i + 1) << ". " << names[i]
-                 << "  (playlist_" << names[i] << ".csv)\n";
+            cout << "  " << (i + 1) << ". " << names[i] << "\n";
+
         cout << "\n  Total custom playlists: " << count << "\n";
     }
 
